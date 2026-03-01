@@ -1,14 +1,15 @@
 # ai-test-guardrails
 
-An MCP (Model Context Protocol) server that provides deterministic guardrails for AI-generated test automation. It validates Playwright and Cypress test proposals using AST-based analysis — detecting flake-prone patterns, enforcing architecture rules, and scoring risk.
+An MCP (Model Context Protocol) server that provides deterministic guardrails for AI-generated and existing test automation. It validates Playwright and Cypress test proposals using AST-based analysis — detecting flake-prone patterns, enforcing architecture rules, scoring risk, and scanning entire projects in a single call.
 
 ## What It Does
 
 - **Validates** AI-generated test code for determinism, flake risk, and architecture compliance
+- **Scans** entire project directories, validating every test file in one pass
 - **Detects** flake-prone constructs: hard sleeps, unbounded retries, unmocked network calls, dynamic selectors
 - **Enforces** architectural rules: page object patterns, selector hygiene, nesting depth limits
 - **Scores** flake risk on a 0–1 scale with detailed factor breakdown
-- **Returns** structured JSON results via the MCP tool protocol
+- **Returns** structured JSON results with transparent policy output via the MCP tool protocol
 
 ## What It Does Not Do
 
@@ -36,7 +37,20 @@ Requires Node.js >= 20.
 node dist/server.js
 ```
 
-Configure in your MCP client (e.g. Claude Desktop `claude_desktop_config.json`):
+Configure in your MCP client. For **Cursor**, add a `.cursor/mcp.json` file to your project root:
+
+```json
+{
+  "mcpServers": {
+    "ai-test-guardrails": {
+      "command": "node",
+      "args": ["/path/to/ai-test-guardrails/dist/server.js"]
+    }
+  }
+}
+```
+
+For **Claude Desktop**, add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -51,13 +65,13 @@ Configure in your MCP client (e.g. Claude Desktop `claude_desktop_config.json`):
 
 ### Enforcement Modes
 
-`validate_test` and `enforce_architecture` use a three-tier enforcement model designed for organisational adoption.
+All tools support a three-tier enforcement model designed for organisational adoption.
 
 | Mode | Action | Use case |
 |------|--------|----------|
 | `"advisory"` | Always `PASSED` or `ADVISED`. Never blocks. | Rollout phase — build trust without friction |
-| `"warn"` | `WARNED` if under threshold, `REJECTED` if exceeded | Balanced adoption — enforce policy gradually |
-| `"block"` (default) | `REJECTED` on any violation | Full enforcement once confidence is established |
+| `"warn"` *(default)* | `WARNED` if under threshold, `REJECTED` if exceeded | Balanced adoption — enforce policy gradually |
+| `"block"` | `REJECTED` on any violation | Full enforcement once confidence is established |
 
 All modes produce identical scores and violation lists. Only `valid` and the `policy.action` field change.
 
@@ -99,11 +113,66 @@ Every result includes a `policy` block that makes enforcement transparent:
 
 This makes it clear the test was rejected because of **policy**, not arbitrary tool behaviour.
 
-### MCP Tools
+---
 
-#### `validate_test`
+## MCP Tools
 
-Full validation: determinism + flake risk + architecture.
+### `scan_project`
+
+Scans an entire project directory, validates every test file in one pass, and returns an aggregate summary with per-file results, project-wide scores, and a ranked list of top offenders.
+
+**Input:**
+
+```json
+{
+  "projectPath": "/path/to/your/tests",
+  "framework": "playwright",
+  "mode": "warn",
+  "architectureThreshold": 3,
+  "flakeRiskThreshold": 0.7,
+  "determinismThreshold": 0
+}
+```
+
+**Output:**
+
+```json
+{
+  "scannedAt": "2026-02-26T22:12:36.742Z",
+  "projectPath": "/path/to/your/tests",
+  "framework": "playwright",
+  "mode": "warn",
+  "thresholds": { "architectureThreshold": 3, "flakeRiskThreshold": 0.7, "determinismThreshold": 0 },
+  "totals": {
+    "files": 19,
+    "passed": 6,
+    "warned": 8,
+    "rejected": 5,
+    "totalViolations": 59
+  },
+  "scores": {
+    "averageDeterminism": 0.99,
+    "averageFlakeRisk": 0.17,
+    "averageArchitecture": 0.93
+  },
+  "topOffenders": [
+    {
+      "file": "admin/info-consulting.email-sender-restrictor.spec.ts",
+      "policy": { "action": "REJECTED", "reasons": ["20 architecture violations exceeded threshold of 3"] },
+      "violations": ["..."]
+    }
+  ],
+  "files": ["...per-file results..."]
+}
+```
+
+Files scanned: `*.spec.ts`, `*.spec.js`, `*.test.ts`, `*.test.js`, `*.cy.ts`, `*.cy.js`. Directories `node_modules`, `.git`, `dist`, and `coverage` are automatically ignored.
+
+---
+
+### `validate_test`
+
+Validates a single test file for determinism, flake risk, and architecture compliance.
 
 **Input (warn mode with custom thresholds):**
 
@@ -172,9 +241,11 @@ Full validation: determinism + flake risk + architecture.
 }
 ```
 
-#### `score_flake_risk`
+---
 
-Focused risk analysis with factor breakdown.
+### `score_flake_risk`
+
+Analyses the flake risk of a single test file and returns a numeric risk score (0–1) with contributing factors.
 
 **Input:**
 
@@ -191,18 +262,20 @@ Focused risk analysis with factor breakdown.
 {
   "score": 0.45,
   "factors": [
-    { "name": "async-heavy", "weight": 0.15, "detected": false, "description": "High number of async operations increases timing sensitivity" },
-    { "name": "network-dependency", "weight": 0.25, "detected": true, "description": "Network calls without mocking create external dependencies" },
-    { "name": "multiple-navigations", "weight": 0.2, "detected": true, "description": "Multiple navigation steps increase page load timing variability" },
-    { "name": "shared-state", "weight": 0.2, "detected": false, "description": "Module-level mutable state can leak between tests" },
-    { "name": "timing-assertions", "weight": 0.2, "detected": false, "description": "Timing-dependent assertions are sensitive to execution speed" }
+    { "name": "async-heavy",          "weight": 0.15, "detected": false, "description": "High number of async operations increases timing sensitivity" },
+    { "name": "network-dependency",   "weight": 0.25, "detected": true,  "description": "Network calls without mocking create external dependencies" },
+    { "name": "multiple-navigations", "weight": 0.20, "detected": true,  "description": "Multiple navigation steps increase page load timing variability" },
+    { "name": "shared-state",         "weight": 0.20, "detected": false, "description": "Module-level mutable state can leak between tests" },
+    { "name": "timing-assertions",    "weight": 0.20, "detected": false, "description": "Timing-dependent assertions are sensitive to execution speed" }
   ]
 }
 ```
 
-#### `enforce_architecture`
+---
 
-Architectural compliance check. Supports `mode` parameter (`"block"` | `"advisory"`).
+### `enforce_architecture`
+
+Checks a single test file for architectural compliance: page object usage, selector patterns, nesting depth, and duplicate titles. Supports all three enforcement modes.
 
 **Input:**
 
@@ -219,11 +292,11 @@ Architectural compliance check. Supports `mode` parameter (`"block"` | `"advisor
 {
   "valid": false,
   "policy": {
-    "mode": "block",
+    "mode": "warn",
     "thresholds": { "architectureThreshold": 3, "flakeRiskThreshold": 0.7, "determinismThreshold": 0 },
     "detected":   { "architectureViolations": 3, "flakeRiskScore": 0, "determinismViolations": 0 },
     "action": "REJECTED",
-    "reasons": ["3 architecture violations (threshold: 0 in block mode)"]
+    "reasons": ["3 architecture violations exceeded threshold of 3"]
   },
   "score": 0,
   "violations": [
@@ -233,6 +306,8 @@ Architectural compliance check. Supports `mode` parameter (`"block"` | `"advisor
   ]
 }
 ```
+
+---
 
 ## Validation Rules (v0.1)
 
@@ -266,6 +341,8 @@ Architectural compliance check. Supports `mode` parameter (`"block"` | `"advisor
 | Shared state | 0.20 | Module-level `let`/`var` |
 | Timing assertions | 0.20 | `waitForTimeout`, assertions with `timeout` option |
 
+---
+
 ## Development
 
 ```bash
@@ -290,24 +367,29 @@ src/
 ├── types/
 │   └── guardrail.types.ts # Shared TypeScript interfaces
 ├── utils/
-│   └── astParser.ts       # TypeScript compiler API utilities
+│   ├── astParser.ts       # TypeScript compiler API utilities
+│   ├── enforcement.ts     # Three-mode policy engine
+│   └── projectScanner.ts  # Project directory walker and aggregator
 └── config/
     └── defaultRules.ts    # Default rule configuration
 tests/
 ├── astParser.test.ts
 ├── determinism.test.ts
 ├── architecture.test.ts
-└── flakeRisk.test.ts
+├── flakeRisk.test.ts
+├── mode.test.ts
+└── projectScanner.test.ts
 ```
 
 ## Roadmap
 
-- [ ] **v0.2** — Configurable rule sets via MCP resource
-- [ ] **v0.2** — Per-rule severity levels (error/warning/info)
-- [ ] **v0.3** — Cypress-specific selector pattern detection
+- [x] **v0.1** — Core validation engine, three enforcement modes, project scanning
+- [ ] **v0.2** — Violation severity tiers (critical / major / minor)
+- [ ] **v0.2** — k6 performance test support
 - [ ] **v0.3** — Auto-fix suggestions in violation messages
+- [ ] **v0.3** — Cypress-specific selector pattern detection
 - [ ] **v0.4** — Support for custom rule plugins
-- [ ] **v0.4** — Test file batch validation
+- [ ] **v0.4** — CI artefact export (scan results to JSON file)
 - [ ] **v0.5** — Historical flake score tracking
 - [ ] **v1.0** — Stable API with semver guarantees
 
