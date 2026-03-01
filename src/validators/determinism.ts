@@ -1,5 +1,5 @@
 import ts from "typescript";
-import type { Framework, DeterminismResult } from "../types/guardrail.types.js";
+import type { Framework, DeterminismResult, Violation } from "../types/guardrail.types.js";
 import type { DeterminismRuleConfig } from "../config/defaultRules.js";
 import {
   findCallsByMethodName,
@@ -14,7 +14,7 @@ export function validateDeterminism(
   framework: Framework,
   config: DeterminismRuleConfig,
 ): DeterminismResult {
-  const violations: string[] = [];
+  const violations: Violation[] = [];
 
   if (config.detectWaitForTimeout) {
     violations.push(...detectWaitForTimeout(sourceFile, framework));
@@ -36,26 +36,25 @@ export function validateDeterminism(
   }
 
   const enabledRules = Object.values(config).filter((v) => v === true).length;
-  const violatedRuleCategories = new Set(violations.map((v) => v.split("]")[1]?.trim().split(" ")[0]));
-  const passedRules = enabledRules - Math.min(violatedRuleCategories.size, enabledRules);
+  const violatedRules = new Set(violations.map((v) => v.rule));
+  const passedRules = enabledRules - Math.min(violatedRules.size, enabledRules);
   const score = enabledRules > 0 ? passedRules / enabledRules : 1;
 
   return { score, violations };
 }
 
-function detectWaitForTimeout(
-  sourceFile: ts.SourceFile,
-  framework: Framework,
-): string[] {
-  const violations: string[] = [];
+function detectWaitForTimeout(sourceFile: ts.SourceFile, framework: Framework): Violation[] {
+  const violations: Violation[] = [];
 
   if (framework === "playwright") {
     const calls = findCallsByMethodName(sourceFile, "waitForTimeout");
     for (const call of calls) {
       const line = getLineNumber(call, sourceFile);
-      violations.push(
-        `[line ${line}] waitForTimeout introduces non-deterministic timing. Use waitForSelector or expect assertions instead.`,
-      );
+      violations.push({
+        severity: "critical",
+        rule: "no-wait-for-timeout",
+        message: `[line ${String(line)}] waitForTimeout introduces non-deterministic timing. Use waitForSelector or expect assertions instead.`,
+      });
     }
   }
 
@@ -65,9 +64,11 @@ function detectWaitForTimeout(
       const firstArg = call.arguments[0];
       if (firstArg && ts.isNumericLiteral(firstArg)) {
         const line = getLineNumber(call, sourceFile);
-        violations.push(
-          `[line ${line}] cy.wait(${firstArg.text}) with numeric argument introduces hard timing dependency. Use cy.intercept() aliases instead.`,
-        );
+        violations.push({
+          severity: "critical",
+          rule: "no-wait-for-timeout",
+          message: `[line ${String(line)}] cy.wait(${firstArg.text}) with numeric argument introduces hard timing dependency. Use cy.intercept() aliases instead.`,
+        });
       }
     }
   }
@@ -75,67 +76,74 @@ function detectWaitForTimeout(
   return violations;
 }
 
-function detectHardSleeps(sourceFile: ts.SourceFile): string[] {
-  const violations: string[] = [];
+function detectHardSleeps(sourceFile: ts.SourceFile): Violation[] {
+  const violations: Violation[] = [];
 
   const setTimeoutCalls = findCallsByMethodName(sourceFile, "setTimeout");
   for (const call of setTimeoutCalls) {
     const line = getLineNumber(call, sourceFile);
-    violations.push(
-      `[line ${line}] setTimeout used as a sleep mechanism. Replace with explicit wait conditions.`,
-    );
+    violations.push({
+      severity: "critical",
+      rule: "no-hard-sleep",
+      message: `[line ${String(line)}] setTimeout used as a sleep mechanism. Replace with explicit wait conditions.`,
+    });
   }
 
   const sleepCalls = findCallsByMethodName(sourceFile, "sleep");
   for (const call of sleepCalls) {
     const line = getLineNumber(call, sourceFile);
-    violations.push(
-      `[line ${line}] sleep() introduces hard timing dependency. Use framework-specific wait mechanisms.`,
-    );
+    violations.push({
+      severity: "critical",
+      rule: "no-hard-sleep",
+      message: `[line ${String(line)}] sleep() introduces hard timing dependency. Use framework-specific wait mechanisms.`,
+    });
   }
 
   return violations;
 }
 
-function detectRandomWithoutSeed(sourceFile: ts.SourceFile): string[] {
-  const violations: string[] = [];
+function detectRandomWithoutSeed(sourceFile: ts.SourceFile): Violation[] {
+  const violations: Violation[] = [];
   const calls = findPropertyAccessCalls(sourceFile, "Math", "random");
   for (const call of calls) {
     const line = getLineNumber(call, sourceFile);
-    violations.push(
-      `[line ${line}] Math.random() produces non-deterministic values. Use a seeded random generator for test data.`,
-    );
+    violations.push({
+      severity: "major",
+      rule: "no-random-without-seed",
+      message: `[line ${String(line)}] Math.random() produces non-deterministic values. Use a seeded random generator for test data.`,
+    });
   }
   return violations;
 }
 
-function detectUnboundedRetries(sourceFile: ts.SourceFile): string[] {
-  const violations: string[] = [];
+function detectUnboundedRetries(sourceFile: ts.SourceFile): Violation[] {
+  const violations: Violation[] = [];
 
   walkAst(sourceFile, (node) => {
     if (ts.isWhileStatement(node) && node.expression.kind === ts.SyntaxKind.TrueKeyword) {
       const line = getLineNumber(node, sourceFile);
-      violations.push(
-        `[line ${line}] while(true) loop detected. Unbounded retries can cause test hangs. Add a maximum retry count.`,
-      );
+      violations.push({
+        severity: "critical",
+        rule: "no-unbounded-retry",
+        message: `[line ${String(line)}] while(true) loop detected. Unbounded retries can cause test hangs. Add a maximum retry count.`,
+      });
     }
 
     if (ts.isForStatement(node) && !node.condition) {
       const line = getLineNumber(node, sourceFile);
-      violations.push(
-        `[line ${line}] Infinite for loop detected. Add a bounded condition to prevent test hangs.`,
-      );
+      violations.push({
+        severity: "critical",
+        rule: "no-unbounded-retry",
+        message: `[line ${String(line)}] Infinite for loop detected. Add a bounded condition to prevent test hangs.`,
+      });
     }
   });
 
   return violations;
 }
 
-function detectUnmockedNetworkCalls(
-  sourceFile: ts.SourceFile,
-  framework: Framework,
-): string[] {
-  const violations: string[] = [];
+function detectUnmockedNetworkCalls(sourceFile: ts.SourceFile, framework: Framework): Violation[] {
+  const violations: Violation[] = [];
 
   const hasMocking =
     framework === "playwright"
@@ -147,11 +155,12 @@ function detectUnmockedNetworkCalls(
   const fetchCalls = findCallsByMethodName(sourceFile, "fetch");
   for (const call of fetchCalls) {
     const line = getLineNumber(call, sourceFile);
-    const mockAdvice =
-      framework === "playwright" ? "page.route()" : "cy.intercept()";
-    violations.push(
-      `[line ${line}] fetch() called without network mocking. Use ${mockAdvice} to mock network calls.`,
-    );
+    const mockAdvice = framework === "playwright" ? "page.route()" : "cy.intercept()";
+    violations.push({
+      severity: "major",
+      rule: "no-unmocked-network",
+      message: `[line ${String(line)}] fetch() called without network mocking. Use ${mockAdvice} to mock network calls.`,
+    });
   }
 
   const axiosMethods = ["get", "post", "put", "delete"] as const;
@@ -159,20 +168,19 @@ function detectUnmockedNetworkCalls(
     const calls = findPropertyAccessCalls(sourceFile, "axios", method);
     for (const call of calls) {
       const line = getLineNumber(call, sourceFile);
-      violations.push(
-        `[line ${line}] axios.${method}() called without network mocking. Mock network requests to ensure deterministic tests.`,
-      );
+      violations.push({
+        severity: "major",
+        rule: "no-unmocked-network",
+        message: `[line ${String(line)}] axios.${method}() called without network mocking. Mock network requests to ensure deterministic tests.`,
+      });
     }
   }
 
   return violations;
 }
 
-function detectDynamicSelectors(
-  sourceFile: ts.SourceFile,
-  framework: Framework,
-): string[] {
-  const violations: string[] = [];
+function detectDynamicSelectors(sourceFile: ts.SourceFile, framework: Framework): Violation[] {
+  const violations: Violation[] = [];
 
   const selectorMethods =
     framework === "playwright"
@@ -184,9 +192,11 @@ function detectDynamicSelectors(
     for (const call of calls) {
       if (hasTemplateLiteralArgument(call)) {
         const line = getLineNumber(call, sourceFile);
-        violations.push(
-          `[line ${line}] Dynamic selector using template literal in ${method}(). Use stable data-testid or role-based selectors.`,
-        );
+        violations.push({
+          severity: "major",
+          rule: "no-dynamic-selector",
+          message: `[line ${String(line)}] Dynamic selector using template literal in ${method}(). Use stable data-testid or role-based selectors.`,
+        });
       }
     }
   }

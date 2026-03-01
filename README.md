@@ -5,10 +5,12 @@ An MCP (Model Context Protocol) server that provides deterministic guardrails fo
 ## What It Does
 
 - **Validates** AI-generated test code for determinism, flake risk, and architecture compliance
-- **Scans** entire project directories, validating every test file in one pass
+- **Classifies** violations as `critical`, `major`, or `minor` for prioritised remediation
+- **Scans** entire project directories, validating every test file in one pass with severity breakdown
 - **Detects** flake-prone constructs: hard sleeps, unbounded retries, unmocked network calls, dynamic selectors
 - **Enforces** architectural rules: page object patterns, selector hygiene, nesting depth limits
 - **Scores** flake risk on a 0–1 scale with detailed factor breakdown
+- **Rejects gracefully** unsupported frameworks (e.g. k6) with a clear, actionable message
 - **Returns** structured JSON results with transparent policy output via the MCP tool protocol
 
 ## What It Does Not Do
@@ -96,7 +98,7 @@ In `warn` mode, enforcement only triggers when detected issues exceed your confi
 
 ### Policy Output
 
-Every result includes a `policy` block that makes enforcement transparent:
+Every result includes a `policy` block that makes enforcement transparent. As of v0.2, `detected` also includes a severity breakdown:
 
 ```json
 {
@@ -104,7 +106,14 @@ Every result includes a `policy` block that makes enforcement transparent:
   "policy": {
     "mode": "warn",
     "thresholds": { "architectureThreshold": 3, "flakeRiskThreshold": 0.7, "determinismThreshold": 0 },
-    "detected":   { "architectureViolations": 10, "flakeRiskScore": 0, "determinismViolations": 0 },
+    "detected": {
+      "architectureViolations": 10,
+      "flakeRiskScore": 0,
+      "determinismViolations": 0,
+      "criticalCount": 0,
+      "majorCount": 8,
+      "minorCount": 2
+    },
     "action": "REJECTED",
     "reasons": ["10 architecture violations exceeded threshold of 3"]
   }
@@ -119,7 +128,7 @@ This makes it clear the test was rejected because of **policy**, not arbitrary t
 
 ### `scan_project`
 
-Scans an entire project directory, validates every test file in one pass, and returns an aggregate summary with per-file results, project-wide scores, and a ranked list of top offenders.
+Scans an entire project directory, validates every test file in one pass, and returns an aggregate summary with per-file results, severity breakdown, project-wide scores, and a ranked list of top offenders.
 
 **Input:**
 
@@ -148,7 +157,10 @@ Scans an entire project directory, validates every test file in one pass, and re
     "passed": 6,
     "warned": 8,
     "rejected": 5,
-    "totalViolations": 59
+    "totalViolations": 59,
+    "criticalViolations": 12,
+    "majorViolations": 30,
+    "minorViolations": 17
   },
   "scores": {
     "averageDeterminism": 0.99,
@@ -157,22 +169,30 @@ Scans an entire project directory, validates every test file in one pass, and re
   },
   "topOffenders": [
     {
-      "file": "admin/info-consulting.email-sender-restrictor.spec.ts",
+      "file": "admin/email-sender-restrictor.spec.ts",
       "policy": { "action": "REJECTED", "reasons": ["20 architecture violations exceeded threshold of 3"] },
       "violations": ["..."]
     }
   ],
-  "files": ["...per-file results..."]
+  "files": ["...per-file results..."],
+  "unsupportedFiles": [
+    { "file": "perf/loadTest.js",  "detectedFramework": "k6" },
+    { "file": "perf/soakTest.js",  "detectedFramework": "k6" }
+  ]
 }
 ```
 
-Files scanned: `*.spec.ts`, `*.spec.js`, `*.test.ts`, `*.test.js`, `*.cy.ts`, `*.cy.js`. Directories `node_modules`, `.git`, `dist`, and `coverage` are automatically ignored.
+**File discovery:** The scanner picks up files in two passes:
+1. **Conventional names** — `*.spec.ts/js`, `*.test.ts/js`, `*.cy.ts/js` are always included.
+2. **Framework-detected** — any other `.ts`/`.js` file whose imports identify it as Playwright, Cypress, or an unsupported framework (e.g. k6) is also picked up. Files with no recognised test-framework imports (config files, helpers, etc.) are silently skipped.
+
+Directories `node_modules`, `.git`, `dist`, and `coverage` are always ignored.
 
 ---
 
 ### `validate_test`
 
-Validates a single test file for determinism, flake risk, and architecture compliance.
+Validates a single test file for determinism, flake risk, and architecture compliance. Each violation carries a `severity` (`critical`, `major`, or `minor`), a `rule` identifier, and a `message`.
 
 **Input (warn mode with custom thresholds):**
 
@@ -187,7 +207,7 @@ Validates a single test file for determinism, flake risk, and architecture compl
 }
 ```
 
-**Output — REJECTED (1 determinism violation exceeded threshold of 0):**
+**Output — REJECTED:**
 
 ```json
 {
@@ -195,16 +215,31 @@ Validates a single test file for determinism, flake risk, and architecture compl
   "policy": {
     "mode": "warn",
     "thresholds": { "architectureThreshold": 3, "flakeRiskThreshold": 0.7, "determinismThreshold": 0 },
-    "detected":   { "architectureViolations": 1, "flakeRiskScore": 0, "determinismViolations": 1 },
+    "detected": {
+      "architectureViolations": 1,
+      "flakeRiskScore": 0,
+      "determinismViolations": 1,
+      "criticalCount": 1,
+      "majorCount": 1,
+      "minorCount": 0
+    },
     "action": "REJECTED",
-    "reasons": ["1 determinism violation exceeded threshold of 0"]
+    "reasons": ["1 determinism violations exceeded threshold of 0"]
   },
-  "determinismScore": 0.8333333333333334,
+  "determinismScore": 0.833,
   "flakeRiskScore": 0,
   "architectureScore": 0.75,
   "violations": [
-    "[line 2] waitForTimeout introduces non-deterministic timing. Use waitForSelector or expect assertions instead.",
-    "[line 3] Direct CSS selector \".btn\" in test code. Extract selectors to page objects and use data-testid or role-based selectors."
+    {
+      "severity": "critical",
+      "rule": "no-wait-for-timeout",
+      "message": "[line 2] waitForTimeout introduces non-deterministic timing. Use waitForSelector or expect assertions instead."
+    },
+    {
+      "severity": "major",
+      "rule": "no-raw-selector",
+      "message": "[line 3] Direct CSS selector \".btn\" in test code. Extract selectors to page objects and use data-testid or role-based selectors."
+    }
   ]
 }
 ```
@@ -213,7 +248,7 @@ Validates a single test file for determinism, flake risk, and architecture compl
 
 ```json
 {
-  "testCode": "test('login', async ({ page }) => {\n  await page.waitForTimeout(1000);\n  await page.locator('.btn').click();\n});",
+  "testCode": "test('login', async ({ page }) => {\n  await page.waitForTimeout(1000);\n});",
   "framework": "playwright",
   "mode": "advisory"
 }
@@ -224,19 +259,9 @@ Validates a single test file for determinism, flake risk, and architecture compl
 ```json
 {
   "valid": true,
-  "policy": {
-    "mode": "advisory",
-    "thresholds": { "architectureThreshold": 3, "flakeRiskThreshold": 0.7, "determinismThreshold": 0 },
-    "detected":   { "architectureViolations": 1, "flakeRiskScore": 0, "determinismViolations": 1 },
-    "action": "ADVISED",
-    "reasons": []
-  },
-  "determinismScore": 0.8333333333333334,
-  "flakeRiskScore": 0,
-  "architectureScore": 0.75,
+  "policy": { "mode": "advisory", "action": "ADVISED", "reasons": [] },
   "violations": [
-    "[line 2] waitForTimeout introduces non-deterministic timing. Use waitForSelector or expect assertions instead.",
-    "[line 3] Direct CSS selector \".btn\" in test code. Extract selectors to page objects and use data-testid or role-based selectors."
+    { "severity": "critical", "rule": "no-wait-for-timeout", "message": "[line 2] waitForTimeout introduces non-deterministic timing..." }
   ]
 }
 ```
@@ -275,7 +300,7 @@ Analyses the flake risk of a single test file and returns a numeric risk score (
 
 ### `enforce_architecture`
 
-Checks a single test file for architectural compliance: page object usage, selector patterns, nesting depth, and duplicate titles. Supports all three enforcement modes.
+Checks a single test file for architectural compliance: page object usage, selector patterns, nesting depth, and duplicate titles. Violations are severity-classified. Supports all three enforcement modes.
 
 **Input:**
 
@@ -293,43 +318,57 @@ Checks a single test file for architectural compliance: page object usage, selec
   "valid": false,
   "policy": {
     "mode": "warn",
-    "thresholds": { "architectureThreshold": 3, "flakeRiskThreshold": 0.7, "determinismThreshold": 0 },
-    "detected":   { "architectureViolations": 3, "flakeRiskScore": 0, "determinismViolations": 0 },
+    "detected": { "architectureViolations": 3, "criticalCount": 1, "majorCount": 0, "minorCount": 2 },
     "action": "REJECTED",
     "reasons": ["3 architecture violations exceeded threshold of 3"]
   },
   "score": 0,
   "violations": [
-    "[line 1] Module-level mutable variable \"count\" can leak state between tests. Use const or move to test-scoped setup.",
-    "Test nesting depth is 3 (max allowed: 2). Flatten describe blocks to improve readability.",
-    "Duplicate test title \"test\". Each test should have a unique title for clear reporting."
+    { "severity": "critical", "rule": "no-global-state",      "message": "[line 1] Module-level mutable variable \"count\" can leak state between tests..." },
+    { "severity": "minor",    "rule": "no-deep-nesting",      "message": "Test nesting depth is 3 (max allowed: 2). Flatten describe blocks..." },
+    { "severity": "minor",    "rule": "no-duplicate-title",   "message": "Duplicate test title \"test\". Each test should have a unique title..." }
   ]
 }
 ```
 
 ---
 
-## Validation Rules (v0.1)
+### Unsupported Framework Detection
+
+If test code imports from an unsupported framework (e.g. k6), tools return a graceful rejection instead of attempting validation:
+
+```json
+{
+  "supported": false,
+  "detectedFramework": "k6",
+  "message": "Framework \"k6\" is not supported by ai-test-guardrails v0.2. Supported frameworks: playwright, cypress.",
+  "supportedFrameworks": ["playwright", "cypress"]
+}
+```
+
+---
+
+## Validation Rules (v0.2)
 
 ### Determinism Rules
 
-| Rule | Detects |
-|------|---------|
-| `waitForTimeout` | `page.waitForTimeout()`, `cy.wait(number)` |
-| Hard sleeps | `setTimeout`, `sleep()` |
-| Random without seed | `Math.random()` |
-| Unbounded retries | `while(true)`, `for(;;)` |
-| Unmocked network | `fetch()`, `axios.*()` without `route()`/`intercept()` |
-| Dynamic selectors | Template literals in `locator()`, `cy.get()`, etc. |
+| Rule | Severity | Detects |
+|------|----------|---------|
+| `no-wait-for-timeout` | **critical** | `page.waitForTimeout()`, `cy.wait(number)` |
+| `no-hard-sleep` | **critical** | `setTimeout`, `sleep()` |
+| `no-unbounded-retry` | **critical** | `while(true)`, `for(;;)` |
+| `no-random-without-seed` | **major** | `Math.random()` |
+| `no-unmocked-network` | **major** | `fetch()`, `axios.*()` without `route()`/`intercept()` |
+| `no-dynamic-selector` | **major** | Template literals in `locator()`, `cy.get()`, etc. |
 
 ### Architecture Rules
 
-| Rule | Enforces |
-|------|----------|
-| Page objects | No direct CSS/ID selectors — use `data-testid` or role-based |
-| No global state | No module-level `let`/`var` declarations |
-| Nesting depth | Max 2 levels of `describe`/`context` nesting |
-| Unique titles | No duplicate `it()`/`test()` titles |
+| Rule | Severity | Enforces |
+|------|----------|----------|
+| `no-global-state` | **critical** | No module-level `let`/`var` declarations |
+| `no-raw-selector` | **major** | No direct CSS/ID selectors — use `data-testid` or role-based |
+| `no-deep-nesting` | **minor** | Max 2 levels of `describe`/`context` nesting |
+| `no-duplicate-title` | **minor** | No duplicate `it()`/`test()` titles |
 
 ### Flake Risk Factors
 
@@ -369,7 +408,8 @@ src/
 ├── utils/
 │   ├── astParser.ts       # TypeScript compiler API utilities
 │   ├── enforcement.ts     # Three-mode policy engine
-│   └── projectScanner.ts  # Project directory walker and aggregator
+│   ├── frameworkDetector.ts # Framework detection from imports (k6, Playwright, Cypress)
+│   └── projectScanner.ts  # Two-pass file discovery, classification, and aggregator
 └── config/
     └── defaultRules.ts    # Default rule configuration
 tests/
@@ -378,14 +418,14 @@ tests/
 ├── architecture.test.ts
 ├── flakeRisk.test.ts
 ├── mode.test.ts
-└── projectScanner.test.ts
+├── projectScanner.test.ts
+└── severity.test.ts
 ```
 
 ## Roadmap
 
 - [x] **v0.1** — Core validation engine, three enforcement modes, project scanning
-- [ ] **v0.2** — Violation severity tiers (critical / major / minor)
-- [ ] **v0.2** — k6 performance test support
+- [x] **v0.2** — Violation severity tiers (critical / major / minor), k6 detection, severity breakdown in scan summary, two-pass `.js`/`.ts` file discovery
 - [ ] **v0.3** — Auto-fix suggestions in violation messages
 - [ ] **v0.3** — Cypress-specific selector pattern detection
 - [ ] **v0.4** — Support for custom rule plugins

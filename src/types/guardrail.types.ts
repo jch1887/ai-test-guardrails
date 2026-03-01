@@ -4,6 +4,14 @@ export type ValidationMode = "advisory" | "warn" | "block";
 
 export type EnforcementAction = "PASSED" | "ADVISED" | "WARNED" | "REJECTED";
 
+export type ViolationSeverity = "critical" | "major" | "minor";
+
+export interface Violation {
+  severity: ViolationSeverity;
+  rule: string;
+  message: string;
+}
+
 export interface EnforcementThresholds {
   architectureThreshold: number;
   flakeRiskThreshold: number;
@@ -17,6 +25,9 @@ export interface EnforcementPolicy {
     architectureViolations: number;
     flakeRiskScore: number;
     determinismViolations: number;
+    criticalCount: number;
+    majorCount: number;
+    minorCount: number;
   };
   action: EnforcementAction;
   reasons: string[];
@@ -28,12 +39,12 @@ export interface ValidationResult {
   determinismScore: number;
   flakeRiskScore: number;
   architectureScore: number;
-  violations: string[];
+  violations: Violation[];
 }
 
 export interface DeterminismResult {
   score: number;
-  violations: string[];
+  violations: Violation[];
 }
 
 export interface FlakeRiskResult {
@@ -51,14 +62,14 @@ export interface FlakeRiskFactor {
 export interface ArchitectureResult {
   valid: boolean;
   score: number;
-  violations: string[];
+  violations: Violation[];
 }
 
 export interface ArchitectureToolResult {
   valid: boolean;
   policy: EnforcementPolicy;
   score: number;
-  violations: string[];
+  violations: Violation[];
 }
 
 export interface FileValidationResult {
@@ -68,7 +79,7 @@ export interface FileValidationResult {
   determinismScore: number;
   flakeRiskScore: number;
   architectureScore: number;
-  violations: string[];
+  violations: Violation[];
 }
 
 export interface ProjectScanSummary {
@@ -83,6 +94,9 @@ export interface ProjectScanSummary {
     warned: number;
     rejected: number;
     totalViolations: number;
+    criticalViolations: number;
+    majorViolations: number;
+    minorViolations: number;
   };
   scores: {
     averageDeterminism: number;
@@ -91,4 +105,17 @@ export interface ProjectScanSummary {
   };
   files: FileValidationResult[];
   topOffenders: FileValidationResult[];
+  unsupportedFiles: UnsupportedFileEntry[];
+}
+
+export interface UnsupportedFrameworkResult {
+  supported: false;
+  detectedFramework: string;
+  message: string;
+  supportedFrameworks: string[];
+}
+
+export interface UnsupportedFileEntry {
+  file: string;
+  detectedFramework: string;
 }

@@ -15,7 +15,7 @@ describe("determinism validator", () => {
       `;
       const result = validateDeterminism(parseSourceCode(code), "playwright", config);
       expect(result.violations.length).toBeGreaterThan(0);
-      expect(result.violations.some((v) => v.includes("waitForTimeout"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("waitForTimeout"))).toBe(true);
     });
 
     it("flags cy.wait with numeric argument in Cypress tests", () => {
@@ -26,7 +26,7 @@ describe("determinism validator", () => {
       `;
       const result = validateDeterminism(parseSourceCode(code), "cypress", config);
       expect(result.violations.length).toBeGreaterThan(0);
-      expect(result.violations.some((v) => v.includes("cy.wait"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("cy.wait"))).toBe(true);
     });
 
     it("does not flag cy.wait with alias argument", () => {
@@ -36,7 +36,7 @@ describe("determinism validator", () => {
         });
       `;
       const result = validateDeterminism(parseSourceCode(code), "cypress", config);
-      expect(result.violations.filter((v) => v.includes("cy.wait"))).toHaveLength(0);
+      expect(result.violations.filter((v) => v.message.includes("cy.wait"))).toHaveLength(0);
     });
   });
 
@@ -48,7 +48,7 @@ describe("determinism validator", () => {
         });
       `;
       const result = validateDeterminism(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("setTimeout"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("setTimeout"))).toBe(true);
     });
 
     it("flags sleep() calls", () => {
@@ -58,7 +58,7 @@ describe("determinism validator", () => {
         });
       `;
       const result = validateDeterminism(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("sleep()"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("sleep()"))).toBe(true);
     });
   });
 
@@ -70,7 +70,7 @@ describe("determinism validator", () => {
         });
       `;
       const result = validateDeterminism(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("Math.random"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("Math.random"))).toBe(true);
     });
   });
 
@@ -85,7 +85,7 @@ describe("determinism validator", () => {
         });
       `;
       const result = validateDeterminism(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("while(true)"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("while(true)"))).toBe(true);
     });
 
     it("flags infinite for loops", () => {
@@ -98,7 +98,7 @@ describe("determinism validator", () => {
         });
       `;
       const result = validateDeterminism(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("Infinite for loop"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("Infinite for loop"))).toBe(true);
     });
   });
 
@@ -110,7 +110,7 @@ describe("determinism validator", () => {
         });
       `;
       const result = validateDeterminism(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("fetch()"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("fetch()"))).toBe(true);
     });
 
     it("does not flag fetch when route mocking is present", () => {
@@ -121,7 +121,7 @@ describe("determinism validator", () => {
         });
       `;
       const result = validateDeterminism(parseSourceCode(code), "playwright", config);
-      expect(result.violations.filter((v) => v.includes("fetch()"))).toHaveLength(0);
+      expect(result.violations.filter((v) => v.message.includes("fetch()"))).toHaveLength(0);
     });
 
     it("flags axios calls without mocking", () => {
@@ -131,7 +131,7 @@ describe("determinism validator", () => {
         });
       `;
       const result = validateDeterminism(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("axios"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("axios"))).toBe(true);
     });
   });
 
@@ -144,7 +144,7 @@ describe("determinism validator", () => {
         });
       `;
       const result = validateDeterminism(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("template literal"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("template literal"))).toBe(true);
     });
 
     it("flags template literal selectors in Cypress", () => {
@@ -155,7 +155,7 @@ describe("determinism validator", () => {
         });
       `;
       const result = validateDeterminism(parseSourceCode(code), "cypress", config);
-      expect(result.violations.some((v) => v.includes("template literal"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("template literal"))).toBe(true);
     });
   });
 

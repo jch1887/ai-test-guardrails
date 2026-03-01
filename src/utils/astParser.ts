@@ -6,7 +6,9 @@ export function parseSourceCode(code: string): ts.SourceFile {
 
 export function walkAst(node: ts.Node, visitor: (node: ts.Node) => void): void {
   visitor(node);
-  ts.forEachChild(node, (child) => walkAst(child, visitor));
+  ts.forEachChild(node, (child) => {
+    walkAst(child, visitor);
+  });
 }
 
 function getCallName(node: ts.CallExpression): string | undefined {
@@ -86,11 +88,15 @@ export function getDescribeDepth(sourceFile: ts.SourceFile): number {
         if (newDepth > maxDepth) {
           maxDepth = newDepth;
         }
-        ts.forEachChild(node, (child) => visit(child, newDepth));
+        ts.forEachChild(node, (child) => {
+          visit(child, newDepth);
+        });
         return;
       }
     }
-    ts.forEachChild(node, (child) => visit(child, currentDepth));
+    ts.forEachChild(node, (child) => {
+      visit(child, currentDepth);
+    });
   }
 
   visit(sourceFile, 0);

@@ -146,6 +146,25 @@ describe("enforcement: policy output structure", () => {
     expect(policy.detected.determinismViolations).toBe(3);
   });
 
+  it("detected includes severity breakdown fields", () => {
+    const policy = resolveEnforcement("warn", MINOR, thresholds);
+    expect(policy.detected).toHaveProperty("criticalCount");
+    expect(policy.detected).toHaveProperty("majorCount");
+    expect(policy.detected).toHaveProperty("minorCount");
+  });
+
+  it("severity counts reflect passed violations", () => {
+    const violations = [
+      { severity: "critical" as const, rule: "no-hard-sleep", message: "sleep" },
+      { severity: "critical" as const, rule: "no-hard-sleep", message: "sleep" },
+      { severity: "major" as const, rule: "no-unmocked-network", message: "fetch" },
+    ];
+    const policy = resolveEnforcement("advisory", MINOR, thresholds, violations);
+    expect(policy.detected.criticalCount).toBe(2);
+    expect(policy.detected.majorCount).toBe(1);
+    expect(policy.detected.minorCount).toBe(0);
+  });
+
   it("thresholds reflect the passed-in config", () => {
     const custom: EnforcementThresholds = {
       architectureThreshold: 5,
