@@ -3,6 +3,7 @@ import type {
   EnforcementAction,
   EnforcementPolicy,
   EnforcementThresholds,
+  Violation,
 } from "../types/guardrail.types.js";
 
 export const DEFAULT_THRESHOLDS: EnforcementThresholds = {
@@ -17,13 +18,28 @@ interface DetectedCounts {
   determinismViolations: number;
 }
 
+export function countBySeverity(violations: Violation[]): {
+  criticalCount: number;
+  majorCount: number;
+  minorCount: number;
+} {
+  return {
+    criticalCount: violations.filter((v) => v.severity === "critical").length,
+    majorCount: violations.filter((v) => v.severity === "major").length,
+    minorCount: violations.filter((v) => v.severity === "minor").length,
+  };
+}
+
 export function resolveEnforcement(
   mode: ValidationMode,
   detected: DetectedCounts,
   thresholds: EnforcementThresholds,
+  allViolations: Violation[] = [],
 ): EnforcementPolicy {
   const reasons: string[] = [];
   let action: EnforcementAction;
+
+  const { criticalCount, majorCount, minorCount } = countBySeverity(allViolations);
 
   const hasAnyViolation =
     detected.architectureViolations > 0 ||
@@ -36,19 +52,22 @@ export function resolveEnforcement(
     const exceedances = getThresholdExceedances(detected, thresholds, reasons);
     action = exceedances > 0 ? "REJECTED" : hasAnyViolation ? "WARNED" : "PASSED";
   } else {
-    if (detected.architectureViolations > 0) {
+    const archCount = detected.architectureViolations;
+    const detCount = detected.determinismViolations;
+    const flakeScore = detected.flakeRiskScore;
+    if (archCount > 0) {
       reasons.push(
-        `${detected.architectureViolations} architecture violation${detected.architectureViolations === 1 ? "" : "s"} (threshold: 0 in block mode)`,
+        `${String(archCount)} architecture violation${archCount === 1 ? "" : "s"} (threshold: 0 in block mode)`,
       );
     }
-    if (detected.determinismViolations > 0) {
+    if (detCount > 0) {
       reasons.push(
-        `${detected.determinismViolations} determinism violation${detected.determinismViolations === 1 ? "" : "s"} (threshold: 0 in block mode)`,
+        `${String(detCount)} determinism violation${detCount === 1 ? "" : "s"} (threshold: 0 in block mode)`,
       );
     }
-    if (detected.flakeRiskScore > 0) {
+    if (flakeScore > 0) {
       reasons.push(
-        `flake risk score ${detected.flakeRiskScore.toFixed(2)} exceeds 0 (threshold: 0 in block mode)`,
+        `flake risk score ${flakeScore.toFixed(2)} exceeds 0 (threshold: 0 in block mode)`,
       );
     }
     action = reasons.length > 0 ? "REJECTED" : "PASSED";
@@ -57,7 +76,12 @@ export function resolveEnforcement(
   return {
     mode,
     thresholds,
-    detected,
+    detected: {
+      ...detected,
+      criticalCount,
+      majorCount,
+      minorCount,
+    },
     action,
     reasons,
   };
@@ -73,21 +97,21 @@ function getThresholdExceedances(
   if (detected.architectureViolations > thresholds.architectureThreshold) {
     count++;
     reasons.push(
-      `${detected.architectureViolations} architecture violations exceeded threshold of ${thresholds.architectureThreshold}`,
+      `${String(detected.architectureViolations)} architecture violations exceeded threshold of ${String(thresholds.architectureThreshold)}`,
     );
   }
 
   if (detected.determinismViolations > thresholds.determinismThreshold) {
     count++;
     reasons.push(
-      `${detected.determinismViolations} determinism violations exceeded threshold of ${thresholds.determinismThreshold}`,
+      `${String(detected.determinismViolations)} determinism violations exceeded threshold of ${String(thresholds.determinismThreshold)}`,
     );
   }
 
   if (detected.flakeRiskScore > thresholds.flakeRiskThreshold) {
     count++;
     reasons.push(
-      `flake risk score ${detected.flakeRiskScore.toFixed(2)} exceeded threshold of ${thresholds.flakeRiskThreshold}`,
+      `flake risk score ${detected.flakeRiskScore.toFixed(2)} exceeded threshold of ${String(thresholds.flakeRiskThreshold)}`,
     );
   }
 

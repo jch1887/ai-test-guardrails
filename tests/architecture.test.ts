@@ -14,7 +14,7 @@ describe("architecture validator", () => {
         });
       `;
       const result = validateArchitecture(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("Direct CSS selector"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("Direct CSS selector"))).toBe(true);
     });
 
     it("flags CSS ID selectors in Playwright", () => {
@@ -24,7 +24,7 @@ describe("architecture validator", () => {
         });
       `;
       const result = validateArchitecture(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("Direct CSS selector"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("Direct CSS selector"))).toBe(true);
     });
 
     it("flags CSS selectors in Cypress", () => {
@@ -34,7 +34,7 @@ describe("architecture validator", () => {
         });
       `;
       const result = validateArchitecture(parseSourceCode(code), "cypress", config);
-      expect(result.violations.some((v) => v.includes("Direct CSS selector"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("Direct CSS selector"))).toBe(true);
     });
 
     it("allows data-testid selectors", () => {
@@ -44,7 +44,9 @@ describe("architecture validator", () => {
         });
       `;
       const result = validateArchitecture(parseSourceCode(code), "playwright", config);
-      expect(result.violations.filter((v) => v.includes("Direct CSS selector"))).toHaveLength(0);
+      expect(
+        result.violations.filter((v) => v.message.includes("Direct CSS selector")),
+      ).toHaveLength(0);
     });
 
     it("allows role-based selectors", () => {
@@ -54,7 +56,9 @@ describe("architecture validator", () => {
         });
       `;
       const result = validateArchitecture(parseSourceCode(code), "playwright", config);
-      expect(result.violations.filter((v) => v.includes("Direct CSS selector"))).toHaveLength(0);
+      expect(
+        result.violations.filter((v) => v.message.includes("Direct CSS selector")),
+      ).toHaveLength(0);
     });
   });
 
@@ -66,9 +70,9 @@ describe("architecture validator", () => {
         test('test2', () => { expect(counter).toBe(1); });
       `;
       const result = validateArchitecture(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("Module-level mutable variable"))).toBe(
-        true,
-      );
+      expect(
+        result.violations.some((v) => v.message.includes("Module-level mutable variable")),
+      ).toBe(true);
     });
 
     it("flags module-level var declarations", () => {
@@ -77,9 +81,9 @@ describe("architecture validator", () => {
         test('test1', () => {});
       `;
       const result = validateArchitecture(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("Module-level mutable variable"))).toBe(
-        true,
-      );
+      expect(
+        result.violations.some((v) => v.message.includes("Module-level mutable variable")),
+      ).toBe(true);
     });
 
     it("allows module-level const declarations", () => {
@@ -90,7 +94,9 @@ describe("architecture validator", () => {
         });
       `;
       const result = validateArchitecture(parseSourceCode(code), "playwright", config);
-      expect(result.violations.filter((v) => v.includes("Module-level mutable"))).toHaveLength(0);
+      expect(
+        result.violations.filter((v) => v.message.includes("Module-level mutable")),
+      ).toHaveLength(0);
     });
   });
 
@@ -106,7 +112,7 @@ describe("architecture validator", () => {
         });
       `;
       const result = validateArchitecture(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("nesting depth"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("nesting depth"))).toBe(true);
     });
 
     it("allows nesting at exactly depth 2", () => {
@@ -118,7 +124,7 @@ describe("architecture validator", () => {
         });
       `;
       const result = validateArchitecture(parseSourceCode(code), "playwright", config);
-      expect(result.violations.filter((v) => v.includes("nesting depth"))).toHaveLength(0);
+      expect(result.violations.filter((v) => v.message.includes("nesting depth"))).toHaveLength(0);
     });
   });
 
@@ -129,7 +135,7 @@ describe("architecture validator", () => {
         it('should work', () => {});
       `;
       const result = validateArchitecture(parseSourceCode(code), "playwright", config);
-      expect(result.violations.some((v) => v.includes("Duplicate test title"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("Duplicate test title"))).toBe(true);
     });
 
     it("allows unique test titles", () => {
@@ -138,7 +144,9 @@ describe("architecture validator", () => {
         it('should work B', () => {});
       `;
       const result = validateArchitecture(parseSourceCode(code), "playwright", config);
-      expect(result.violations.filter((v) => v.includes("Duplicate test title"))).toHaveLength(0);
+      expect(
+        result.violations.filter((v) => v.message.includes("Duplicate test title")),
+      ).toHaveLength(0);
     });
   });
 

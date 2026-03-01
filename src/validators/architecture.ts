@@ -1,5 +1,5 @@
 import ts from "typescript";
-import type { Framework, ArchitectureResult } from "../types/guardrail.types.js";
+import type { Framework, ArchitectureResult, Violation } from "../types/guardrail.types.js";
 import type { ArchitectureRuleConfig } from "../config/defaultRules.js";
 import {
   findCallsByMethodName,
@@ -15,7 +15,7 @@ export function validateArchitecture(
   framework: Framework,
   config: ArchitectureRuleConfig,
 ): ArchitectureResult {
-  const violationGroups: string[][] = [];
+  const violationGroups: Violation[][] = [];
 
   if (config.enforcePageObjects) {
     violationGroups.push(detectDirectSelectors(sourceFile, framework));
@@ -36,11 +36,7 @@ export function validateArchitecture(
   const passedChecks = violationGroups.filter((group) => group.length === 0).length;
   const score = totalChecks > 0 ? passedChecks / totalChecks : 1;
 
-  return {
-    valid: violations.length === 0,
-    score,
-    violations,
-  };
+  return { valid: violations.length === 0, score, violations };
 }
 
 function isBareSelector(selector: string): boolean {
@@ -55,11 +51,14 @@ function isBareSelector(selector: string): boolean {
   return isCssClassOrId || hasComplexCssPatterns || isTagWithQualifier;
 }
 
-function detectDirectSelectors(
-  sourceFile: ts.SourceFile,
-  framework: Framework,
-): string[] {
-  const violations: string[] = [];
+function classifySelector(selector: string): "critical" | "major" {
+  if (/^#[a-zA-Z0-9]{6,}/.test(selector)) return "critical";
+  if (/^#bs-select/.test(selector)) return "critical";
+  return "major";
+}
+
+function detectDirectSelectors(sourceFile: ts.SourceFile, framework: Framework): Violation[] {
+  const violations: Violation[] = [];
 
   const selectorMethods =
     framework === "playwright" ? ["locator", "$", "$$"] : ["get", "find"];
@@ -70,9 +69,11 @@ function detectDirectSelectors(
       const selectorArg = getFirstArgumentText(call);
       if (selectorArg && isBareSelector(selectorArg)) {
         const line = getLineNumber(call, sourceFile);
-        violations.push(
-          `[line ${line}] Direct CSS selector "${selectorArg}" in test code. Extract selectors to page objects and use data-testid or role-based selectors.`,
-        );
+        violations.push({
+          severity: classifySelector(selectorArg),
+          rule: "no-raw-selector",
+          message: `[line ${String(line)}] Direct CSS selector "${selectorArg}" in test code. Extract selectors to page objects and use data-testid or role-based selectors.`,
+        });
       }
     }
   }
@@ -80,34 +81,37 @@ function detectDirectSelectors(
   return violations;
 }
 
-function detectGlobalState(sourceFile: ts.SourceFile): string[] {
-  const violations: string[] = [];
+function detectGlobalState(sourceFile: ts.SourceFile): Violation[] {
+  const violations: Violation[] = [];
   const declarations = findModuleLevelMutableDeclarations(sourceFile);
   for (const decl of declarations) {
     const line = getLineNumber(decl, sourceFile);
     const name = ts.isIdentifier(decl.name) ? decl.name.text : "<destructured>";
-    violations.push(
-      `[line ${line}] Module-level mutable variable "${name}" can leak state between tests. Use const or move to test-scoped setup.`,
-    );
+    violations.push({
+      severity: "critical",
+      rule: "no-global-state",
+      message: `[line ${String(line)}] Module-level mutable variable "${name}" can leak state between tests. Use const or move to test-scoped setup.`,
+    });
   }
   return violations;
 }
 
-function detectExcessiveNesting(
-  sourceFile: ts.SourceFile,
-  maxDepth: number,
-): string[] {
+function detectExcessiveNesting(sourceFile: ts.SourceFile, maxDepth: number): Violation[] {
   const depth = getDescribeDepth(sourceFile);
   if (depth > maxDepth) {
     return [
-      `Test nesting depth is ${depth} (max allowed: ${maxDepth}). Flatten describe blocks to improve readability.`,
+      {
+        severity: "minor",
+        rule: "no-deep-nesting",
+        message: `Test nesting depth is ${String(depth)} (max allowed: ${String(maxDepth)}). Flatten describe blocks to improve readability.`,
+      },
     ];
   }
   return [];
 }
 
-function detectDuplicateTestTitles(sourceFile: ts.SourceFile): string[] {
-  const violations: string[] = [];
+function detectDuplicateTestTitles(sourceFile: ts.SourceFile): Violation[] {
+  const violations: Violation[] = [];
   const titles = getTestTitles(sourceFile);
   const seen = new Map<string, number>();
 
@@ -115,9 +119,11 @@ function detectDuplicateTestTitles(sourceFile: ts.SourceFile): string[] {
     const count = (seen.get(title) ?? 0) + 1;
     seen.set(title, count);
     if (count === 2) {
-      violations.push(
-        `Duplicate test title "${title}". Each test should have a unique title for clear reporting.`,
-      );
+      violations.push({
+        severity: "minor",
+        rule: "no-duplicate-title",
+        message: `Duplicate test title "${title}". Each test should have a unique title for clear reporting.`,
+      });
     }
   }
 

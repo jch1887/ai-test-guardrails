@@ -7,13 +7,18 @@ import { validateDeterminism } from "./validators/determinism.js";
 import { validateArchitecture } from "./validators/architecture.js";
 import { scoreFlakeRisk } from "./validators/flakeRisk.js";
 import { resolveEnforcement, isValid, DEFAULT_THRESHOLDS } from "./utils/enforcement.js";
+import { detectFrameworkFromSource } from "./utils/frameworkDetector.js";
 import { scanProject } from "./utils/projectScanner.js";
 import { DEFAULT_RULES } from "./config/defaultRules.js";
-import type { ValidationResult, ArchitectureToolResult } from "./types/guardrail.types.js";
+import type {
+  ValidationResult,
+  ArchitectureToolResult,
+  UnsupportedFrameworkResult,
+} from "./types/guardrail.types.js";
 
 const server = new McpServer({
   name: "ai-test-guardrails",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
 const baseInput = {
@@ -55,10 +60,10 @@ server.registerTool(
   {
     title: "Validate Test",
     description:
-      "Validate an AI-generated test for determinism, flake risk, and architecture compliance. Supports three enforcement modes: advisory (never blocks), warn (threshold-based), block (zero-tolerance). Returns a structured policy report.",
+      "Validate an AI-generated test for determinism, flake risk, and architecture compliance. Supports three enforcement modes: advisory (never blocks), warn (threshold-based), block (zero-tolerance). Returns a structured policy report with severity-classified violations.",
     inputSchema: validationInput,
   },
-  async ({
+  ({
     testCode,
     framework,
     mode,
@@ -67,6 +72,19 @@ server.registerTool(
     determinismThreshold,
   }) => {
     const sourceFile = parseSourceCode(testCode);
+
+    const detection = detectFrameworkFromSource(sourceFile);
+    if (!detection.isSupported && detection.detected !== null) {
+      const unsupported: UnsupportedFrameworkResult = {
+        supported: false,
+        detectedFramework: detection.detected,
+        message: `Framework "${detection.detected}" is not supported by ai-test-guardrails v0.2. Supported frameworks: playwright, cypress.`,
+        supportedFrameworks: ["playwright", "cypress"],
+      };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(unsupported, null, 2) }],
+      };
+    }
 
     const determinism = validateDeterminism(sourceFile, framework, DEFAULT_RULES.determinism);
     const flakeRisk = scoreFlakeRisk(sourceFile, framework, DEFAULT_RULES.flakeRisk);
@@ -83,6 +101,7 @@ server.registerTool(
         determinismViolations: determinism.violations.length,
       },
       thresholds,
+      allViolations,
     );
 
     const result: ValidationResult = {
@@ -108,8 +127,22 @@ server.registerTool(
       "Analyse the flake risk of test code and return a numeric risk score (0-1) with contributing factors.",
     inputSchema: baseInput,
   },
-  async ({ testCode, framework }) => {
+  ({ testCode, framework }) => {
     const sourceFile = parseSourceCode(testCode);
+
+    const detection = detectFrameworkFromSource(sourceFile);
+    if (!detection.isSupported && detection.detected !== null) {
+      const unsupported: UnsupportedFrameworkResult = {
+        supported: false,
+        detectedFramework: detection.detected,
+        message: `Framework "${detection.detected}" is not supported by ai-test-guardrails v0.2. Supported frameworks: playwright, cypress.`,
+        supportedFrameworks: ["playwright", "cypress"],
+      };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(unsupported, null, 2) }],
+      };
+    }
+
     const result = scoreFlakeRisk(sourceFile, framework, DEFAULT_RULES.flakeRisk);
 
     return {
@@ -123,10 +156,10 @@ server.registerTool(
   {
     title: "Enforce Architecture",
     description:
-      "Check test code for architectural compliance. Supports three enforcement modes with configurable thresholds.",
+      "Check test code for architectural compliance. Supports three enforcement modes with configurable thresholds. Violations are severity-classified (critical/major/minor).",
     inputSchema: validationInput,
   },
-  async ({
+  ({
     testCode,
     framework,
     mode,
@@ -135,6 +168,20 @@ server.registerTool(
     determinismThreshold,
   }) => {
     const sourceFile = parseSourceCode(testCode);
+
+    const detection = detectFrameworkFromSource(sourceFile);
+    if (!detection.isSupported && detection.detected !== null) {
+      const unsupported: UnsupportedFrameworkResult = {
+        supported: false,
+        detectedFramework: detection.detected,
+        message: `Framework "${detection.detected}" is not supported by ai-test-guardrails v0.2. Supported frameworks: playwright, cypress.`,
+        supportedFrameworks: ["playwright", "cypress"],
+      };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(unsupported, null, 2) }],
+      };
+    }
+
     const archResult = validateArchitecture(sourceFile, framework, DEFAULT_RULES.architecture);
 
     const thresholds = { architectureThreshold, flakeRiskThreshold, determinismThreshold };
@@ -146,6 +193,7 @@ server.registerTool(
         determinismViolations: 0,
       },
       thresholds,
+      archResult.violations,
     );
 
     const result: ArchitectureToolResult = {
@@ -166,7 +214,7 @@ server.registerTool(
   {
     title: "Scan Project",
     description:
-      "Scan an entire project directory for test files and validate all of them in one pass. Returns an aggregate summary with per-file results, scores, top offenders, and project-wide totals. Supports all three enforcement modes with configurable thresholds.",
+      "Scan an entire project directory for test files and validate all of them in one pass. Returns an aggregate summary with per-file results, severity breakdown (critical/major/minor), top offenders, and project-wide totals. Supports all three enforcement modes with configurable thresholds.",
     inputSchema: {
       projectPath: z
         .string()
@@ -198,7 +246,7 @@ server.registerTool(
         .describe("Max determinism violations per file before warn mode escalates to REJECTED"),
     },
   },
-  async ({
+  ({
     projectPath,
     framework,
     mode,
