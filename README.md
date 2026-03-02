@@ -1,10 +1,13 @@
 # ai-test-guardrails
 
+[![npm version](https://img.shields.io/npm/v/ai-test-guardrails.svg)](https://www.npmjs.com/package/ai-test-guardrails)
+[![licence](https://img.shields.io/npm/l/ai-test-guardrails.svg)](./LICENSE)
+
 An MCP (Model Context Protocol) server that provides deterministic guardrails for AI-generated and existing test automation. It validates Playwright and Cypress test proposals using AST-based analysis — detecting flake-prone patterns, enforcing architecture rules, scoring risk, and scanning entire projects in a single call.
 
 ## What It Does
 
-- **Validates** AI-generated test code for determinism, flake risk, and architecture compliance
+- **Validates** AI-generated test/ existing test code for determinism, flake risk, and architecture compliance
 - **Classifies** violations as `critical`, `major`, or `minor` for prioritised remediation
 - **Scans** entire project directories, validating every test file in one pass with severity breakdown
 - **Detects** flake-prone constructs: hard sleeps, unbounded retries, unmocked network calls, dynamic selectors
@@ -425,7 +428,7 @@ tests/
 ## Roadmap
 
 - [x] **v0.1** — Core validation engine, three enforcement modes, project scanning
-- [x] **v0.2** — Violation severity tiers (critical / major / minor), k6 detection, severity breakdown in scan summary, two-pass `.js`/`.ts` file discovery
+- [x] **v0.2** — Violation severity tiers (critical / major / minor), severity breakdown in scan summary, two-pass `.js`/`.ts` file discovery
 - [ ] **v0.3** — Auto-fix suggestions in violation messages
 - [ ] **v0.3** — Cypress-specific selector pattern detection
 - [ ] **v0.4** — Support for custom rule plugins

@@ -1,0 +1,13 @@
+src/
+tests/
+examples/
+examples2/
+.cursor/
+.prettierrc
+eslint.config.js
+vitest.config.ts
+tsconfig.json
+*.tsbuildinfo
+.env
+.DS_Store
+coverage/
