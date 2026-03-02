@@ -425,6 +425,62 @@ tests/
 └── severity.test.ts
 ```
 
+## Contributing
+
+Contributions, bug reports, and feature suggestions are welcome. This is an open source project and community input directly shapes the roadmap.
+
+### Reporting Issues
+
+If you find a bug or unexpected behaviour, please [open an issue](https://github.com/jch1887/ai-test-guardrails/issues) and include:
+
+- A minimal code snippet that reproduces the problem
+- The framework (`playwright` or `cypress`) and enforcement mode you were using
+- The full tool output (JSON response)
+- Your Node.js version (`node --version`)
+
+### Suggesting Features or New Rules
+
+Have an idea for a new validation rule, flake risk factor, or tool feature? [Open an issue](https://github.com/jch1887/ai-test-guardrails/issues) with the label **`enhancement`** and describe:
+
+- The problem or pattern you want to catch
+- Why it matters for test reliability or architecture
+- Any example code that should trigger (or not trigger) the rule
+
+### Submitting a Pull Request
+
+1. Fork the repository and create a branch from `main`
+2. Install dependencies: `npm install`
+3. Make your changes — new rules live in `src/validators/`, new flake factors in `src/validators/flakeRisk.ts`
+4. Add or update tests in `tests/` to cover your change
+5. Ensure all checks pass:
+
+```bash
+npm test          # all tests must pass
+npm run lint      # no lint errors
+npm run typecheck # no type errors
+```
+
+6. Open a pull request against `main` with a clear description of what changed and why
+
+### Development Setup
+
+```bash
+git clone https://github.com/jch1887/ai-test-guardrails.git
+cd ai-test-guardrails
+npm install
+npm run build
+npm test
+```
+
+### Code Style
+
+- TypeScript strict mode is enabled — avoid `any`
+- Prettier and ESLint configs are included; run `npm run format` before committing
+- Keep rule logic self-contained and unit-testable
+- Violation messages should be actionable: say what to do, not just what went wrong
+
+---
+
 ## Roadmap
 
 - [x] **v0.1** — Core validation engine, three enforcement modes, project scanning
