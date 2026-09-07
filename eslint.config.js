@@ -22,4 +22,12 @@ export default tseslint.config(
       "@typescript-eslint/strict-boolean-expressions": "off",
     },
   },
+  {
+    // Tests favour readability over annotation; keep the type-safety rules on.
+    files: ["tests/**/*.ts"],
+    rules: {
+      "@typescript-eslint/explicit-function-return-type": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+    },
+  },
 );

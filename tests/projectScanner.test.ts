@@ -68,7 +68,7 @@ beforeAll(() => {
   fs.writeFileSync(path.join(tmpDir, "perf", "loadTest.js"), K6_SCRIPT);
   fs.writeFileSync(path.join(tmpDir, "perf", "soakTest.js"), K6_SCRIPT);
 
-  // Helper file — no test framework imports, should be skipped
+  // Helper file: no test framework imports, should be skipped
   fs.writeFileSync(path.join(tmpDir, "utils", "helpers.js"), HELPER_FILE);
 
   // node_modules should always be ignored

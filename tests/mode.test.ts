@@ -33,7 +33,7 @@ describe("enforcement: advisory mode", () => {
     expect(isValid(policy.action)).toBe(true);
   });
 
-  it("ADVISED when violations exist — never REJECTED", () => {
+  it("ADVISED when violations exist, never REJECTED", () => {
     const policy = resolveEnforcement("advisory", HEAVY, thresholds);
     expect(policy.action).toBe("ADVISED");
     expect(isValid(policy.action)).toBe(true);
@@ -183,8 +183,16 @@ describe("enforcement: policy output structure", () => {
 });
 
 describe("isValid helper", () => {
-  it("PASSED is valid", () => expect(isValid("PASSED")).toBe(true));
-  it("ADVISED is valid", () => expect(isValid("ADVISED")).toBe(true));
-  it("WARNED is valid", () => expect(isValid("WARNED")).toBe(true));
-  it("REJECTED is not valid", () => expect(isValid("REJECTED")).toBe(false));
+  it("PASSED is valid", () => {
+    expect(isValid("PASSED")).toBe(true);
+  });
+  it("ADVISED is valid", () => {
+    expect(isValid("ADVISED")).toBe(true);
+  });
+  it("WARNED is valid", () => {
+    expect(isValid("WARNED")).toBe(true);
+  });
+  it("REJECTED is not valid", () => {
+    expect(isValid("REJECTED")).toBe(false);
+  });
 });

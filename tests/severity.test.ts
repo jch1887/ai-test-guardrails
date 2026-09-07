@@ -6,14 +6,18 @@ import { detectFrameworkFromSource } from "../src/utils/frameworkDetector.js";
 import { countBySeverity } from "../src/utils/enforcement.js";
 import { DEFAULT_RULES } from "../src/config/defaultRules.js";
 
-describe("violation severity classification — determinism", () => {
+describe("violation severity classification: determinism", () => {
   it("waitForTimeout is classified as critical", () => {
     const code = `
       test('x', async ({ page }) => {
         await page.waitForTimeout(500);
       });
     `;
-    const result = validateDeterminism(parseSourceCode(code), "playwright", DEFAULT_RULES.determinism);
+    const result = validateDeterminism(
+      parseSourceCode(code),
+      "playwright",
+      DEFAULT_RULES.determinism,
+    );
     const v = result.violations.find((v) => v.rule === "no-wait-for-timeout");
     expect(v).toBeDefined();
     expect(v?.severity).toBe("critical");
@@ -25,7 +29,11 @@ describe("violation severity classification — determinism", () => {
         await new Promise(r => setTimeout(r, 2000));
       });
     `;
-    const result = validateDeterminism(parseSourceCode(code), "playwright", DEFAULT_RULES.determinism);
+    const result = validateDeterminism(
+      parseSourceCode(code),
+      "playwright",
+      DEFAULT_RULES.determinism,
+    );
     const v = result.violations.find((v) => v.rule === "no-hard-sleep");
     expect(v).toBeDefined();
     expect(v?.severity).toBe("critical");
@@ -37,7 +45,11 @@ describe("violation severity classification — determinism", () => {
         while(true) { break; }
       });
     `;
-    const result = validateDeterminism(parseSourceCode(code), "playwright", DEFAULT_RULES.determinism);
+    const result = validateDeterminism(
+      parseSourceCode(code),
+      "playwright",
+      DEFAULT_RULES.determinism,
+    );
     const v = result.violations.find((v) => v.rule === "no-unbounded-retry");
     expect(v).toBeDefined();
     expect(v?.severity).toBe("critical");
@@ -49,7 +61,11 @@ describe("violation severity classification — determinism", () => {
         const x = Math.random();
       });
     `;
-    const result = validateDeterminism(parseSourceCode(code), "playwright", DEFAULT_RULES.determinism);
+    const result = validateDeterminism(
+      parseSourceCode(code),
+      "playwright",
+      DEFAULT_RULES.determinism,
+    );
     const v = result.violations.find((v) => v.rule === "no-random-without-seed");
     expect(v).toBeDefined();
     expect(v?.severity).toBe("major");
@@ -61,7 +77,11 @@ describe("violation severity classification — determinism", () => {
         await fetch('/api');
       });
     `;
-    const result = validateDeterminism(parseSourceCode(code), "playwright", DEFAULT_RULES.determinism);
+    const result = validateDeterminism(
+      parseSourceCode(code),
+      "playwright",
+      DEFAULT_RULES.determinism,
+    );
     const v = result.violations.find((v) => v.rule === "no-unmocked-network");
     expect(v).toBeDefined();
     expect(v?.severity).toBe("major");
@@ -74,7 +94,11 @@ describe("violation severity classification — determinism", () => {
         await page.locator(\`#\${id}\`).click();
       });
     `;
-    const result = validateDeterminism(parseSourceCode(code), "playwright", DEFAULT_RULES.determinism);
+    const result = validateDeterminism(
+      parseSourceCode(code),
+      "playwright",
+      DEFAULT_RULES.determinism,
+    );
     const v = result.violations.find((v) => v.rule === "no-dynamic-selector");
     expect(v).toBeDefined();
     expect(v?.severity).toBe("major");
@@ -86,7 +110,11 @@ describe("violation severity classification — determinism", () => {
         await page.waitForTimeout(100);
       });
     `;
-    const result = validateDeterminism(parseSourceCode(code), "playwright", DEFAULT_RULES.determinism);
+    const result = validateDeterminism(
+      parseSourceCode(code),
+      "playwright",
+      DEFAULT_RULES.determinism,
+    );
     expect(result.violations.length).toBeGreaterThan(0);
     for (const v of result.violations) {
       expect(v).toHaveProperty("severity");
@@ -97,13 +125,17 @@ describe("violation severity classification — determinism", () => {
   });
 });
 
-describe("violation severity classification — architecture", () => {
+describe("violation severity classification: architecture", () => {
   it("module-level mutable state is classified as critical", () => {
     const code = `
       let count = 0;
       test('x', () => { count++; });
     `;
-    const result = validateArchitecture(parseSourceCode(code), "playwright", DEFAULT_RULES.architecture);
+    const result = validateArchitecture(
+      parseSourceCode(code),
+      "playwright",
+      DEFAULT_RULES.architecture,
+    );
     const v = result.violations.find((v) => v.rule === "no-global-state");
     expect(v).toBeDefined();
     expect(v?.severity).toBe("critical");
@@ -119,7 +151,11 @@ describe("violation severity classification — architecture", () => {
         });
       });
     `;
-    const result = validateArchitecture(parseSourceCode(code), "playwright", DEFAULT_RULES.architecture);
+    const result = validateArchitecture(
+      parseSourceCode(code),
+      "playwright",
+      DEFAULT_RULES.architecture,
+    );
     const v = result.violations.find((v) => v.rule === "no-deep-nesting");
     expect(v).toBeDefined();
     expect(v?.severity).toBe("minor");
@@ -130,7 +166,11 @@ describe("violation severity classification — architecture", () => {
       it('same title', () => {});
       it('same title', () => {});
     `;
-    const result = validateArchitecture(parseSourceCode(code), "playwright", DEFAULT_RULES.architecture);
+    const result = validateArchitecture(
+      parseSourceCode(code),
+      "playwright",
+      DEFAULT_RULES.architecture,
+    );
     const v = result.violations.find((v) => v.rule === "no-duplicate-title");
     expect(v).toBeDefined();
     expect(v?.severity).toBe("minor");
@@ -142,7 +182,11 @@ describe("violation severity classification — architecture", () => {
         await page.locator('.some-class').click();
       });
     `;
-    const result = validateArchitecture(parseSourceCode(code), "playwright", DEFAULT_RULES.architecture);
+    const result = validateArchitecture(
+      parseSourceCode(code),
+      "playwright",
+      DEFAULT_RULES.architecture,
+    );
     const v = result.violations.find((v) => v.rule === "no-raw-selector");
     expect(v).toBeDefined();
     expect(["major", "critical"]).toContain(v?.severity);

@@ -1,11 +1,12 @@
 import ts from "typescript";
-import type { Framework, FlakeRiskResult } from "../types/guardrail.types.js";
+import type { Framework, FlakeRiskFactor, FlakeRiskResult } from "../types/guardrail.types.js";
 import type { FlakeRiskWeightConfig } from "../config/defaultRules.js";
 import {
   countAwaitExpressions,
   countNavigationCalls,
   findCallsByMethodName,
   findModuleLevelMutableDeclarations,
+  isTimeoutConfigurationCall,
   walkAst,
 } from "../utils/astParser.js";
 
@@ -16,36 +17,43 @@ export function scoreFlakeRisk(
   framework: Framework,
   config: FlakeRiskWeightConfig,
 ): FlakeRiskResult {
-  const factors = [
+  const remediation = remediationFor(framework);
+
+  const factors: FlakeRiskFactor[] = [
     {
       name: "async-heavy",
       weight: config.asyncHeavyWeight,
       detected: isAsyncHeavy(sourceFile),
       description: "High number of async operations increases timing sensitivity",
+      remediation: remediation.asyncHeavy,
     },
     {
       name: "network-dependency",
       weight: config.networkDependencyWeight,
       detected: hasNetworkDependency(sourceFile),
       description: "Network calls without mocking create external dependencies",
+      remediation: remediation.networkDependency,
     },
     {
       name: "multiple-navigations",
       weight: config.multipleNavigationsWeight,
       detected: hasMultipleNavigations(sourceFile, framework),
       description: "Multiple navigation steps increase page load timing variability",
+      remediation: remediation.multipleNavigations,
     },
     {
       name: "shared-state",
       weight: config.sharedStateWeight,
       detected: hasSharedState(sourceFile),
       description: "Module-level mutable state can leak between tests",
+      remediation: remediation.sharedState,
     },
     {
       name: "timing-assertions",
       weight: config.timingAssertionsWeight,
       detected: hasTimingAssertions(sourceFile),
       description: "Timing-dependent assertions are sensitive to execution speed",
+      remediation: remediation.timingAssertions,
     },
   ];
 
@@ -56,6 +64,41 @@ export function scoreFlakeRisk(
   return {
     score: Math.min(score, 1),
     factors,
+  };
+}
+
+interface FactorRemediation {
+  asyncHeavy: string;
+  networkDependency: string;
+  multipleNavigations: string;
+  sharedState: string;
+  timingAssertions: string;
+}
+
+function remediationFor(framework: Framework): FactorRemediation {
+  if (framework === "playwright") {
+    return {
+      asyncHeavy: `Split the test so each case covers one flow with at most ${String(ASYNC_HEAVY_THRESHOLD)} awaits, and move shared setup into test.beforeEach or a fixture.`,
+      networkDependency:
+        "Mock the request with page.route('**/api/**', (route) => route.fulfill({ json: mockResponse })) or use a request fixture so the test does not depend on a live service.",
+      multipleNavigations:
+        "Start each test at the page under test using baseURL and a single page.goto(); cover the other pages in their own tests.",
+      sharedState:
+        "Replace module-level let/var with const, or create the value inside test.beforeEach so every test starts from a fresh state.",
+      timingAssertions:
+        "Remove waitForTimeout and explicit timeout options; rely on auto-retrying assertions such as await expect(locator).toBeVisible().",
+    };
+  }
+  return {
+    asyncHeavy: `Split the test so each case covers one flow with at most ${String(ASYNC_HEAVY_THRESHOLD)} awaits, and move shared setup into beforeEach.`,
+    networkDependency:
+      "Stub the request with cy.intercept('GET', '/api/**', { fixture: 'response.json' }).as('api') and wait on the alias instead of calling the live service.",
+    multipleNavigations:
+      "Start each test at the page under test with a single cy.visit(); cover the other pages in their own tests.",
+    sharedState:
+      "Replace module-level let/var with const, or create the value inside beforeEach so every test starts from a fresh state.",
+    timingAssertions:
+      "Remove cy.wait(ms) and explicit timeout options; rely on retrying assertions such as cy.get('[data-cy=result]').should('be.visible').",
   };
 }
 
@@ -93,7 +136,7 @@ function hasTimingAssertions(sourceFile: ts.SourceFile): boolean {
       return;
     }
 
-    if (method === "setTimeout") {
+    if (method === "setTimeout" && !isTimeoutConfigurationCall(node)) {
       found = true;
       return;
     }
