@@ -1,5 +1,10 @@
 import ts from "typescript";
-import type { Framework, DeterminismResult, Violation } from "../types/guardrail.types.js";
+import type {
+  CustomRule,
+  Framework,
+  DeterminismResult,
+  Violation,
+} from "../types/guardrail.types.js";
 import type { DeterminismRuleConfig } from "../config/defaultRules.js";
 import {
   findCallsByMethodName,
@@ -7,12 +12,15 @@ import {
   walkAst,
   getLineNumber,
   hasTemplateLiteralArgument,
+  isTimeoutConfigurationCall,
 } from "../utils/astParser.js";
+import { runCustomRules } from "./customRules.js";
 
 export function validateDeterminism(
   sourceFile: ts.SourceFile,
   framework: Framework,
   config: DeterminismRuleConfig,
+  customRules: CustomRule[] = [],
 ): DeterminismResult {
   const violations: Violation[] = [];
 
@@ -20,7 +28,7 @@ export function validateDeterminism(
     violations.push(...detectWaitForTimeout(sourceFile, framework));
   }
   if (config.detectHardSleeps) {
-    violations.push(...detectHardSleeps(sourceFile));
+    violations.push(...detectHardSleeps(sourceFile, framework));
   }
   if (config.detectRandomWithoutSeed) {
     violations.push(...detectRandomWithoutSeed(sourceFile));
@@ -35,12 +43,28 @@ export function validateDeterminism(
     violations.push(...detectDynamicSelectors(sourceFile, framework));
   }
 
-  const enabledRules = Object.values(config).filter((v) => v === true).length;
+  const customGroups = runCustomRules(customRules, "determinism", sourceFile, framework);
+  violations.push(...customGroups.flat());
+
+  const enabledBuiltIn = Object.values(config).filter((v) => v === true).length;
+  const enabledRules = enabledBuiltIn + customGroups.length;
   const violatedRules = new Set(violations.map((v) => v.rule));
   const passedRules = enabledRules - Math.min(violatedRules.size, enabledRules);
   const score = enabledRules > 0 ? passedRules / enabledRules : 1;
 
   return { score, violations };
+}
+
+function conditionWaitSnippet(framework: Framework): string {
+  return framework === "playwright"
+    ? "await expect(page.getByTestId('result')).toBeVisible();"
+    : "cy.get('[data-cy=result]').should('be.visible');";
+}
+
+function networkMockSnippet(framework: Framework): string {
+  return framework === "playwright"
+    ? "await page.route('**/api/**', (route) => route.fulfill({ json: mockResponse }));"
+    : "cy.intercept('GET', '/api/**', { fixture: 'response.json' }).as('api');";
 }
 
 function detectWaitForTimeout(sourceFile: ts.SourceFile, framework: Framework): Violation[] {
@@ -54,6 +78,7 @@ function detectWaitForTimeout(sourceFile: ts.SourceFile, framework: Framework): 
         severity: "critical",
         rule: "no-wait-for-timeout",
         message: `[line ${String(line)}] waitForTimeout introduces non-deterministic timing. Use waitForSelector or expect assertions instead.`,
+        suggestion: `Wait for the condition you actually need: ${conditionWaitSnippet(framework)}`,
       });
     }
   }
@@ -68,6 +93,8 @@ function detectWaitForTimeout(sourceFile: ts.SourceFile, framework: Framework): 
           severity: "critical",
           rule: "no-wait-for-timeout",
           message: `[line ${String(line)}] cy.wait(${firstArg.text}) with numeric argument introduces hard timing dependency. Use cy.intercept() aliases instead.`,
+          suggestion:
+            "Alias the request and wait for it: cy.intercept('GET', '/api/**').as('api'); cy.wait('@api');",
         });
       }
     }
@@ -76,16 +103,19 @@ function detectWaitForTimeout(sourceFile: ts.SourceFile, framework: Framework): 
   return violations;
 }
 
-function detectHardSleeps(sourceFile: ts.SourceFile): Violation[] {
+function detectHardSleeps(sourceFile: ts.SourceFile, framework: Framework): Violation[] {
   const violations: Violation[] = [];
 
-  const setTimeoutCalls = findCallsByMethodName(sourceFile, "setTimeout");
+  const setTimeoutCalls = findCallsByMethodName(sourceFile, "setTimeout").filter(
+    (call) => !isTimeoutConfigurationCall(call),
+  );
   for (const call of setTimeoutCalls) {
     const line = getLineNumber(call, sourceFile);
     violations.push({
       severity: "critical",
       rule: "no-hard-sleep",
       message: `[line ${String(line)}] setTimeout used as a sleep mechanism. Replace with explicit wait conditions.`,
+      suggestion: `Replace the delay with an assertion that retries until the UI is ready: ${conditionWaitSnippet(framework)}`,
     });
   }
 
@@ -96,6 +126,7 @@ function detectHardSleeps(sourceFile: ts.SourceFile): Violation[] {
       severity: "critical",
       rule: "no-hard-sleep",
       message: `[line ${String(line)}] sleep() introduces hard timing dependency. Use framework-specific wait mechanisms.`,
+      suggestion: `Replace sleep() with a condition-based wait: ${conditionWaitSnippet(framework)}`,
     });
   }
 
@@ -111,6 +142,8 @@ function detectRandomWithoutSeed(sourceFile: ts.SourceFile): Violation[] {
       severity: "major",
       rule: "no-random-without-seed",
       message: `[line ${String(line)}] Math.random() produces non-deterministic values. Use a seeded random generator for test data.`,
+      suggestion:
+        "Use fixed fixture data, or a seeded generator so runs are reproducible: const rng = seedrandom('fixed-seed'); const value = rng();",
     });
   }
   return violations;
@@ -118,6 +151,8 @@ function detectRandomWithoutSeed(sourceFile: ts.SourceFile): Violation[] {
 
 function detectUnboundedRetries(sourceFile: ts.SourceFile): Violation[] {
   const violations: Violation[] = [];
+  const boundedLoopSnippet =
+    "for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) { if (await isReady()) break; }";
 
   walkAst(sourceFile, (node) => {
     if (ts.isWhileStatement(node) && node.expression.kind === ts.SyntaxKind.TrueKeyword) {
@@ -126,6 +161,7 @@ function detectUnboundedRetries(sourceFile: ts.SourceFile): Violation[] {
         severity: "critical",
         rule: "no-unbounded-retry",
         message: `[line ${String(line)}] while(true) loop detected. Unbounded retries can cause test hangs. Add a maximum retry count.`,
+        suggestion: `Bound the loop with a maximum attempt count: ${boundedLoopSnippet}`,
       });
     }
 
@@ -135,6 +171,7 @@ function detectUnboundedRetries(sourceFile: ts.SourceFile): Violation[] {
         severity: "critical",
         rule: "no-unbounded-retry",
         message: `[line ${String(line)}] Infinite for loop detected. Add a bounded condition to prevent test hangs.`,
+        suggestion: `Give the loop a terminating condition: ${boundedLoopSnippet}`,
       });
     }
   });
@@ -152,14 +189,17 @@ function detectUnmockedNetworkCalls(sourceFile: ts.SourceFile, framework: Framew
 
   if (hasMocking) return violations;
 
+  const mockAdvice = framework === "playwright" ? "page.route()" : "cy.intercept()";
+  const suggestion = `Mock the request before it fires: ${networkMockSnippet(framework)}`;
+
   const fetchCalls = findCallsByMethodName(sourceFile, "fetch");
   for (const call of fetchCalls) {
     const line = getLineNumber(call, sourceFile);
-    const mockAdvice = framework === "playwright" ? "page.route()" : "cy.intercept()";
     violations.push({
       severity: "major",
       rule: "no-unmocked-network",
       message: `[line ${String(line)}] fetch() called without network mocking. Use ${mockAdvice} to mock network calls.`,
+      suggestion,
     });
   }
 
@@ -172,6 +212,7 @@ function detectUnmockedNetworkCalls(sourceFile: ts.SourceFile, framework: Framew
         severity: "major",
         rule: "no-unmocked-network",
         message: `[line ${String(line)}] axios.${method}() called without network mocking. Mock network requests to ensure deterministic tests.`,
+        suggestion,
       });
     }
   }
@@ -187,6 +228,11 @@ function detectDynamicSelectors(sourceFile: ts.SourceFile, framework: Framework)
       ? ["locator", "$", "$$", "querySelector", "querySelectorAll"]
       : ["get", "find", "contains"];
 
+  const stableSelectorSnippet =
+    framework === "playwright"
+      ? "page.getByTestId('submit-button')"
+      : "cy.get('[data-cy=submit-button]')";
+
   for (const method of selectorMethods) {
     const calls = findCallsByMethodName(sourceFile, method);
     for (const call of calls) {
@@ -196,6 +242,7 @@ function detectDynamicSelectors(sourceFile: ts.SourceFile, framework: Framework)
           severity: "major",
           rule: "no-dynamic-selector",
           message: `[line ${String(line)}] Dynamic selector using template literal in ${method}(). Use stable data-testid or role-based selectors.`,
+          suggestion: `Give the element a stable test id and select it directly: ${stableSelectorSnippet}. If the id must vary, build it inside a page-object helper.`,
         });
       }
     }

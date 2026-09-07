@@ -140,7 +140,9 @@ export function countNavigationCalls(
   return count;
 }
 
-export function findModuleLevelMutableDeclarations(sourceFile: ts.SourceFile): ts.VariableDeclaration[] {
+export function findModuleLevelMutableDeclarations(
+  sourceFile: ts.SourceFile,
+): ts.VariableDeclaration[] {
   const results: ts.VariableDeclaration[] = [];
   for (const statement of sourceFile.statements) {
     if (ts.isVariableStatement(statement)) {
@@ -164,4 +166,24 @@ export function hasTemplateLiteralArgument(call: ts.CallExpression): boolean {
 
 export function getLineNumber(node: ts.Node, sourceFile: ts.SourceFile): number {
   return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+}
+
+/**
+ * Receivers whose `setTimeout` method configures a test-runner timeout rather than
+ * sleeping: Playwright's `test.setTimeout(ms)` / `testInfo.setTimeout(ms)`, Jest's
+ * `jest.setTimeout(ms)`, and Cypress/Mocha `context`.
+ */
+const TIMEOUT_CONFIGURATION_RECEIVERS = new Set(["test", "testInfo", "jest", "context"]);
+
+/** True when a `setTimeout` call is a test-runner timeout setting, not a sleep. */
+export function isTimeoutConfigurationCall(call: ts.CallExpression): boolean {
+  const expr = call.expression;
+  if (!ts.isPropertyAccessExpression(expr) || expr.name.text !== "setTimeout") return false;
+  const receiver = expr.expression;
+  if (ts.isIdentifier(receiver)) return TIMEOUT_CONFIGURATION_RECEIVERS.has(receiver.text);
+  // Handles `test.describe.setTimeout`-style chains and `this.setTimeout` in hooks.
+  if (ts.isPropertyAccessExpression(receiver) && ts.isIdentifier(receiver.expression)) {
+    return TIMEOUT_CONFIGURATION_RECEIVERS.has(receiver.expression.text);
+  }
+  return receiver.kind === ts.SyntaxKind.ThisKeyword;
 }

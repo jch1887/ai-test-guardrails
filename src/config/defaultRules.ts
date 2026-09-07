@@ -12,6 +12,10 @@ export interface ArchitectureRuleConfig {
   forbidGlobalState: boolean;
   maxDescribeDepth: number;
   forbidDuplicateTestTitles: boolean;
+  /** Flags `.eq(n)`, `.nth(n)`, `.first()`, `.last()`, and `:nth-child`-style selectors. */
+  detectPositionalSelectors: boolean;
+  /** Flags actions invoked with `{ force: true }`, which bypass actionability checks. */
+  detectForcedActions: boolean;
 }
 
 export interface FlakeRiskWeightConfig {
@@ -42,6 +46,8 @@ export const DEFAULT_RULES: RuleConfig = {
     forbidGlobalState: true,
     maxDescribeDepth: 2,
     forbidDuplicateTestTitles: true,
+    detectPositionalSelectors: true,
+    detectForcedActions: true,
   },
   flakeRisk: {
     asyncHeavyWeight: 0.15,

@@ -2,12 +2,12 @@ import fs from "fs";
 import path from "path";
 import { parseSourceCode } from "./astParser.js";
 import { detectFrameworkFromSource } from "./frameworkDetector.js";
-import { validateDeterminism } from "../validators/determinism.js";
-import { validateArchitecture } from "../validators/architecture.js";
-import { scoreFlakeRisk } from "../validators/flakeRisk.js";
-import { resolveEnforcement, isValid } from "./enforcement.js";
-import { DEFAULT_RULES } from "../config/defaultRules.js";
+import { validateSource } from "../validators/pipeline.js";
+import { recordScan } from "./scanHistory.js";
+import { createIgnoreMatcher } from "./scanPolicy.js";
+import type { RuleConfig } from "../config/defaultRules.js";
 import type {
+  CustomRule,
   Framework,
   ValidationMode,
   EnforcementThresholds,
@@ -36,16 +36,31 @@ const IGNORED_DIRS = new Set(["node_modules", ".git", "dist", "coverage", ".cach
 
 const TOP_OFFENDERS_COUNT = 5;
 
+export interface ScanOptions {
+  /** Rule configuration. Defaults to `DEFAULT_RULES`. */
+  rules?: RuleConfig;
+  /** Custom rules loaded from plugins. */
+  customRules?: CustomRule[];
+  /** When set, the full scan summary is written to this JSON file (CI artefact). */
+  outputPath?: string;
+  /** When set, the scan is appended to this JSON history file and trend data is returned. */
+  historyPath?: string;
+  /** gitignore-style globs (relative to the project) to skip, on top of the built-in directory list. */
+  ignore?: string[];
+}
+
 interface ClassifiedFiles {
   supported: string[];
   unsupported: UnsupportedFileEntry[];
 }
 
 /**
- * Walk a directory and return every .ts/.js file, respecting the ignore list.
+ * Walk a directory and return every .ts/.js file, respecting the built-in ignore list
+ * and any user-supplied ignore globs.
  */
-function walkForSourceFiles(dirPath: string): string[] {
+function walkForSourceFiles(dirPath: string, ignore: string[]): string[] {
   const results: string[] = [];
+  const isIgnored = createIgnoreMatcher(ignore);
 
   function walk(current: string): void {
     let entries: fs.Dirent[];
@@ -57,6 +72,7 @@ function walkForSourceFiles(dirPath: string): string[] {
     for (const entry of entries) {
       if (IGNORED_DIRS.has(entry.name)) continue;
       const fullPath = path.join(current, entry.name);
+      if (isIgnored(path.relative(dirPath, fullPath))) continue;
       if (entry.isDirectory()) {
         walk(fullPath);
       } else if (entry.isFile() && ALL_SOURCE_PATTERN.test(entry.name)) {
@@ -77,8 +93,12 @@ function walkForSourceFiles(dirPath: string): string[] {
  * Files with no recognised test framework imports and no conventional naming are skipped
  * to avoid false positives on config/helper files.
  */
-export function classifyProjectFiles(dirPath: string, resolvedBase: string): ClassifiedFiles {
-  const allFiles = walkForSourceFiles(dirPath);
+export function classifyProjectFiles(
+  dirPath: string,
+  resolvedBase: string,
+  ignore: string[] = [],
+): ClassifiedFiles {
+  const allFiles = walkForSourceFiles(dirPath, ignore);
   const supported: string[] = [];
   const unsupported: UnsupportedFileEntry[] = [];
 
@@ -106,13 +126,20 @@ export function classifyProjectFiles(dirPath: string, resolvedBase: string): Cla
         detectedFramework: detection.detected,
       });
     } else if (detection.detected !== null) {
-      // Recognised as Playwright or Cypress via imports — include for validation.
+      // Recognised as Playwright or Cypress via imports, include for validation.
       supported.push(filePath);
     }
-    // detection.detected === null → no framework imports found, skip (config/helper file).
+    // detection.detected === null means no framework imports were found; skip (config/helper file).
   }
 
   return { supported, unsupported };
+}
+
+function writeArtefact(outputPath: string, summary: ProjectScanSummary): string {
+  const resolved = path.resolve(outputPath);
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  fs.writeFileSync(resolved, JSON.stringify(summary, null, 2) + "\n");
+  return resolved;
 }
 
 export function scanProject(
@@ -120,13 +147,16 @@ export function scanProject(
   framework: Framework,
   mode: ValidationMode,
   thresholds: EnforcementThresholds,
+  options: ScanOptions = {},
 ): ProjectScanSummary {
   const resolvedPath = path.resolve(projectPath);
   const { supported: testFiles, unsupported: unsupportedFiles } = classifyProjectFiles(
     resolvedPath,
     resolvedPath,
+    options.ignore ?? [],
   );
 
+  const validationOptions = { rules: options.rules, customRules: options.customRules };
   const fileResults: FileValidationResult[] = [];
 
   for (const filePath of testFiles) {
@@ -137,32 +167,17 @@ export function scanProject(
       continue;
     }
 
-    const sourceFile = parseSourceCode(code);
-    const determinism = validateDeterminism(sourceFile, framework, DEFAULT_RULES.determinism);
-    const flakeRisk = scoreFlakeRisk(sourceFile, framework, DEFAULT_RULES.flakeRisk);
-    const architecture = validateArchitecture(sourceFile, framework, DEFAULT_RULES.architecture);
-
-    const allViolations = [...determinism.violations, ...architecture.violations];
-
-    const policy = resolveEnforcement(
+    const result = validateSource(
+      parseSourceCode(code),
+      framework,
       mode,
-      {
-        architectureViolations: architecture.violations.length,
-        flakeRiskScore: flakeRisk.score,
-        determinismViolations: determinism.violations.length,
-      },
       thresholds,
-      allViolations,
+      validationOptions,
     );
 
     fileResults.push({
       file: path.relative(resolvedPath, filePath),
-      valid: isValid(policy.action),
-      policy,
-      determinismScore: determinism.score,
-      flakeRiskScore: flakeRisk.score,
-      architectureScore: architecture.score,
-      violations: allViolations,
+      ...result,
     });
   }
 
@@ -196,7 +211,7 @@ export function scanProject(
     .sort((a, b) => b.violations.length - a.violations.length)
     .slice(0, TOP_OFFENDERS_COUNT);
 
-  return {
+  const summary: ProjectScanSummary = {
     scannedAt: new Date().toISOString(),
     projectPath: resolvedPath,
     framework,
@@ -208,4 +223,15 @@ export function scanProject(
     topOffenders,
     unsupportedFiles,
   };
+
+  if (options.historyPath !== undefined) {
+    summary.history = recordScan(options.historyPath, summary);
+  }
+
+  if (options.outputPath !== undefined) {
+    summary.outputPath = path.resolve(options.outputPath);
+    writeArtefact(summary.outputPath, summary);
+  }
+
+  return summary;
 }
