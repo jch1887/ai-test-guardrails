@@ -730,6 +730,26 @@ npm test
 
 ---
 
+## Releasing
+
+Releases are driven by git tags. The [release workflow](.github/workflows/release.yml) runs when a `v*` tag is pushed and:
+
+1. Checks that the tag matches the version in `package.json`
+2. Runs the full gate through `prepublishOnly` (lint, typecheck, format check, tests, build)
+3. Publishes to npm with a provenance attestation, unless that version is already published
+4. Creates a GitHub release using the matching section of `CHANGELOG.md`
+
+To cut a release:
+
+```bash
+npm version minor          # or patch / major; updates package.json and creates the tag
+git push origin main --follow-tags
+```
+
+Move the `Unreleased` notes in `CHANGELOG.md` under the new version heading before tagging.
+
+npm authentication uses one of two methods. Either add an `NPM_TOKEN` repository secret holding an npm automation token, or configure [trusted publishing](https://docs.npmjs.com/trusted-publishers) on npmjs.com for this repository and the `release.yml` workflow, which needs no secret at all.
+
 ## Versioning
 
 This project follows [Semantic Versioning](https://semver.org/). From 1.0.0 onward the public contract is:
