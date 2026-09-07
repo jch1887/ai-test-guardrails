@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Release workflow: pushing a `v*` tag runs the gate, publishes to npm with provenance, and creates the GitHub release from the matching CHANGELOG section.
+
 ## [1.0.0] - 2026-09-07
 
 First stable release. From this version on, the MCP tool names, their input
@@ -72,6 +78,7 @@ of them will require a major version bump.
 - Three enforcement modes: `advisory`, `warn`, `block`, with configurable thresholds.
 - `validate_test`, `score_flake_risk`, `enforce_architecture`, and `scan_project` MCP tools.
 
+[Unreleased]: https://github.com/jch1887/ai-test-guardrails/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/jch1887/ai-test-guardrails/compare/v0.2.0...v1.0.0
 [0.2.1]: https://github.com/jch1887/ai-test-guardrails/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jch1887/ai-test-guardrails/compare/v0.1.0...v0.2.0

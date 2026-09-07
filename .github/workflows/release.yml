@@ -1,0 +1,80 @@
+name: Release
+
+# Runs when a version tag such as v1.2.3 is pushed. It verifies the tag matches
+# package.json, publishes to npm with provenance (unless that version is already
+# published), and creates a GitHub release using the matching CHANGELOG section.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: write # create the GitHub release
+  id-token: write # npm provenance attestation
+
+jobs:
+  release:
+    name: Publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      # npm 11.5 or later is required for trusted publishing (OIDC) and provenance.
+      - run: npm install -g npm@latest
+
+      - run: npm ci
+
+      - name: Check that the tag matches package.json
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+          echo "VERSION=$PKG_VERSION" >> "$GITHUB_ENV"
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            /^## \[/ { if (found) exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::warning::No CHANGELOG section for $VERSION; the release will use generated notes"
+          fi
+
+      - name: Skip publish if this version is already on npm
+        run: |
+          if npm view "ai-test-guardrails@$VERSION" version >/dev/null 2>&1; then
+            echo "ai-test-guardrails@$VERSION is already published; skipping npm publish"
+            echo "ALREADY_PUBLISHED=true" >> "$GITHUB_ENV"
+          fi
+
+      # Authenticates with NPM_TOKEN when the secret exists, otherwise relies on
+      # npm trusted publishing configured for this repository and workflow.
+      - name: Publish to npm with provenance
+        if: env.ALREADY_PUBLISHED != 'true'
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; skipping"
+            exit 0
+          fi
+          if [ -s release-notes.md ]; then
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          fi
