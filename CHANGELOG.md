@@ -28,7 +28,7 @@ of them will require a major version bump.
 - `--version` and `--help` CLI flags on the binary.
 - Programmatic API exported from the package entry point (`validateSource`, `scanProject`, `createServer`, `defineConfig`, history helpers, and all types).
 - `LICENSE` (MIT), `CHANGELOG.md`, and a GitHub Actions CI workflow.
-- `files` allowlist, `repository`, `homepage`, and `bugs` metadata in `package.json`.
+- `files` allowlist, `repository`, `homepage`, and `bugs` metadata in `package.json`. The `bin` path is written without a leading `./`, which npm 11 otherwise rejects and drops.
 - `prepublishOnly` script that runs lint, typecheck, format check, tests, and build before publishing.
 - Stdio integration test that drives the server through a real MCP client.
 
@@ -47,6 +47,12 @@ of them will require a major version bump.
 ### Security
 
 - Refreshed `package-lock.json` to pick up patched transitive dependencies (non-breaking `npm audit fix`). Production dependencies report zero advisories.
+
+## [0.2.1] - 2026-03-02
+
+### Fixed
+
+- npm tarball no longer ships `src/`, `examples/`, `.cursor/`, and tool config files. No runtime changes.
 
 ## [0.2.0] - 2026-02-26
 
@@ -67,5 +73,6 @@ of them will require a major version bump.
 - `validate_test`, `score_flake_risk`, `enforce_architecture`, and `scan_project` MCP tools.
 
 [1.0.0]: https://github.com/jch1887/ai-test-guardrails/compare/v0.2.0...v1.0.0
+[0.2.1]: https://github.com/jch1887/ai-test-guardrails/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jch1887/ai-test-guardrails/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jch1887/ai-test-guardrails/releases/tag/v0.1.0

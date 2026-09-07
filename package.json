@@ -21,7 +21,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "ai-test-guardrails": "./dist/server.js"
+    "ai-test-guardrails": "dist/server.js"
   },
   "files": [
     "dist",
